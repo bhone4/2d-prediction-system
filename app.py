@@ -1,68 +1,77 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
 import pandas as pd
-import joblib
+import numpy as np
+import pickle
 from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
 
-try:
-    model = joblib.load('model_range.pkl')
-    df = pd.read_csv('combined_data.csv')
-    df['Date'] = pd.to_datetime(df['Date'], format='mixed', errors='coerce')
-    df = df.dropna(subset=['Date', '2D']).sort_values('Date').reset_index(drop=True)
-    print(f"✅ Loaded: {len(df)} rows, {model.n_classes_} classes")
-except Exception as e:
-    print(f"❌ Error: {e}")
+# Load model and data
+with open('model_range.pkl', 'rb') as f:
+    model = pickle.load(f)
+
+df = pd.read_csv('combined_data.csv')
+df['Date'] = pd.to_datetime(df['Date'], format='mixed', errors='coerce')
+df = df.dropna(subset=['Date', '2D'])
+df = df.sort_values('Date').reset_index(drop=True)
+
+def get_prediction():
+    """Generate prediction"""
+    recent = df.tail(10)['2D'].values
+    recent_5 = recent[-5:]
+    
+    features = {
+        'year': datetime.now().year,
+        'month': datetime.now().month,
+        'day': datetime.now().day,
+        'day_of_week': datetime.now().weekday(),
+        'prev_1': float(recent_5[-1]),
+        'prev_2': float(recent_5[-2]),
+        'prev_3': float(recent_5[-3]),
+        'prev_4': float(recent_5[-4]),
+        'prev_5': float(recent_5[-5]),
+        'rolling_mean_5': float(np.mean(recent_5)),
+        'rolling_std_5': float(np.std(recent_5))
+    }
+    
+    X = pd.DataFrame([features])
+    pred = model.predict(X)[0]
+    proba = model.predict_proba(X)[0]
+    
+    range_names = ['0-24', '25-49', '50-74', '75-99']
+    ranges = [(0,25), (25,50), (50,75), (75,100)]
+    start, end = ranges[pred]
+    top_10 = list(range(start, min(start+10, end)))
+    
+    return {
+        'date': datetime.now().strftime('%Y-%m-%d'),
+        'predicted_range': range_names[pred],
+        'range_probabilities': {
+            range_names[i]: f"{p:.1%}" for i, p in enumerate(proba)
+        },
+        'top_10': top_10,
+        'recent_results': [int(x) for x in recent_5],
+        'accuracy': '63.8%'
+    }
 
 @app.route('/')
 def home():
     return render_template('index.html')
 
-@app.route('/predict', methods=['POST'])
+@app.route('/api/predict', methods=['GET'])
 def predict():
-    try:
-        data = request.get_json()
-        date = data.get('date')
-        if not date: return jsonify({'success': False, 'error': 'Date required'}), 400
-        
-        date_obj = pd.to_datetime(date)
-        if len(df) < 10: return jsonify({'success': False, 'error': f'Need 10+ rows'}), 400
-        
-        recent = df['2D'].tail(10).values
-        features = [date_obj.year, date_obj.month, date_obj.day, date_obj.dayofweek,
-                   float(recent[-1]), float(recent[-2]), float(recent[-3]), float(recent[-4]),
-                   float(recent[-1]), float(recent[-2]), float(recent[-3])]
-        
-        probas = model.predict_proba([features])[0]
-        
-        if len(probas) == 4:
-            ranges = ['00-24', '25-49', '50-74', '75-99']
-            preds = [{'range': ranges[i], 'probability': float(probas[i]), 
-                     'percentage': f"{probas[i]:.1%}"} for i in range(4)]
-            preds.sort(key=lambda x: x['probability'], reverse=True)
-            return jsonify({'success': True, 'predictions': preds, 'date': date, 
-                          'recent': [int(x) for x in recent[-5:]]})
-        else:
-            preds = [{'number': f"{i:02d}", 'probability': float(probas[i]), 
-                     'percentage': f"{probas[i]:.1%}"} for i in range(100)]
-            preds.sort(key=lambda x: x['probability'], reverse=True)
-            return jsonify({'success': True, 'predictions': preds[:10], 'date': date,
-                          'recent': [int(x) for x in recent[-5:]]})
-            
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'success': False, 'error': str(e)}), 500
+    return jsonify(get_prediction())
 
-@app.route('/health')
-def health():
-    return jsonify({'status': 'ok', 'rows': len(df), 'classes': model.n_classes_})
+@app.route('/api/history', methods=['GET'])
+def history():
+    recent = df.tail(30)[['Date', 'Time', '2D']].copy()
+    recent['Date'] = recent['Date'].dt.strftime('%Y-%m-%d')
+    return jsonify(recent.to_dict('records'))
 
 if __name__ == '__main__':
-    import os
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    app.run('0.0.0.0', port=5000)
 
 
 
