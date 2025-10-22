@@ -41,29 +41,23 @@ def predict():
         # Get recent 2D values from dataset
         recent_values = df['2D'].tail(10).values
         
-        # Create features for prediction
-        features = {
-            'year': date_obj.year,
-            'month': date_obj.month,
-            'day': date_obj.day,
-            'day_of_week': date_obj.dayofweek,
-            'prev_1': float(recent_values[-1]),
-            'prev_2': float(recent_values[-2]),
-            'prev_3': float(recent_values[-3]),
-            'prev_4': float(recent_values[-4])
-        }
-        
-        # Prepare feature array for model
+        # Create 11 features for prediction (model expects 11 features)
         feature_array = [
-            features['year'],
-            features['month'],
-            features['day'],
-            features['day_of_week'],
-            features['prev_1'],
-            features['prev_2'],
-            features['prev_3'],
-            features['prev_4']
+            date_obj.year,              # 1. year
+            date_obj.month,             # 2. month
+            date_obj.day,               # 3. day
+            date_obj.dayofweek,         # 4. day_of_week
+            float(recent_values[-1]),   # 5. prev_1
+            float(recent_values[-2]),   # 6. prev_2
+            float(recent_values[-3]),   # 7. prev_3
+            float(recent_values[-4]),   # 8. prev_4
+            float(recent_values[-1]),   # 9. prev_1_float (duplicate for compatibility)
+            float(recent_values[-2]),   # 10. prev_2_float
+            float(recent_values[-3])    # 11. prev_3_float
         ]
+        
+        print(f"📊 Features: {len(feature_array)} features")
+        print(f"📊 Feature values: {feature_array}")
         
         # Get predictions from model
         probabilities = model.predict_proba([feature_array])[0]
@@ -106,5 +100,7 @@ if __name__ == '__main__':
     import os
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port, debug=False)
+
+
 
 
